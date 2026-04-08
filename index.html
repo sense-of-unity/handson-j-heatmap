@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日本人口ヒートマップ</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+      background: #f0f4f8;
+      color: #333;
+    }
+
+    header {
+      background: #1a2e44;
+      color: white;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 { font-size: 1.3rem; }
+
+    #controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    #controls label { font-size: 0.9rem; opacity: 0.85; }
+
+    #year-select {
+      padding: 6px 14px;
+      border-radius: 4px;
+      border: none;
+      font-size: 1rem;
+      cursor: pointer;
+      background: #fff;
+      color: #1a2e44;
+    }
+
+    #main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 16px 32px;
+      gap: 16px;
+    }
+
+    #year-display {
+      font-size: 2.4rem;
+      font-weight: bold;
+      color: #1a2e44;
+      letter-spacing: 2px;
+    }
+
+    #map-container {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      padding: 12px;
+      width: 100%;
+      max-width: 920px;
+    }
+
+    #map { width: 100%; height: auto; display: block; }
+
+    #legend-container {
+      width: 100%;
+      max-width: 920px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      padding: 12px 20px 4px;
+    }
+
+    #legend { width: 100%; display: block; }
+
+    #tooltip {
+      position: fixed;
+      background: rgba(20, 30, 50, 0.9);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      z-index: 1000;
+      white-space: nowrap;
+    }
+
+    .prefecture-path {
+      stroke: #fff;
+      stroke-width: 0.4;
+      cursor: pointer;
+    }
+
+    .prefecture-path:hover {
+      stroke: #333;
+      stroke-width: 1.5;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🗾 日本人口ヒートマップ</h1>
+  <div id="controls">
+    <label for="year-select">年を選択:</label>
+    <select id="year-select"></select>
+  </div>
+</header>
+
+<div id="main">
+  <div id="year-display"></div>
+  <div id="map-container">
+    <svg id="map" viewBox="0 0 900 680"></svg>
+  </div>
+  <div id="legend-container">
+    <svg id="legend" height="60"></svg>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+  // ── 人口データ（file://で開いてもCORSエラーにならないよう埋め込み） ──
+  const populationData = {
+    "2023": [
+      { "id": 1, "name": "北海道", "population": 5094404 },
+      { "id": 2, "name": "青森県", "population": 1184315 },
+      { "id": 3, "name": "岩手県", "population": 1164998 },
+      { "id": 4, "name": "宮城県", "population": 2261944 },
+      { "id": 5, "name": "秋田県", "population": 914603 },
+      { "id": 6, "name": "山形県", "population": 1027173 },
+      { "id": 7, "name": "福島県", "population": 1765476 },
+      { "id": 8, "name": "茨城県", "population": 2824330 },
+      { "id": 9, "name": "栃木県", "population": 1902047 },
+      { "id": 10, "name": "群馬県", "population": 1897368 },
+      { "id": 11, "name": "埼玉県", "population": 7331252 },
+      { "id": 12, "name": "千葉県", "population": 6271911 },
+      { "id": 13, "name": "東京都", "population": 14095066 },
+      { "id": 14, "name": "神奈川県", "population": 9239857 },
+      { "id": 15, "name": "新潟県", "population": 2128761 },
+      { "id": 16, "name": "富山県", "population": 1002340 },
+      { "id": 17, "name": "石川県", "population": 1111623 },
+      { "id": 18, "name": "福井県", "population": 742562 },
+      { "id": 19, "name": "山梨県", "population": 800049 },
+      { "id": 20, "name": "長野県", "population": 2003882 },
+      { "id": 21, "name": "岐阜県", "population": 1920803 },
+      { "id": 22, "name": "静岡県", "population": 3550388 },
+      { "id": 23, "name": "愛知県", "population": 7480579 },
+      { "id": 24, "name": "三重県", "population": 1714856 },
+      { "id": 25, "name": "滋賀県", "population": 1407849 },
+      { "id": 26, "name": "京都府", "population": 2530114 },
+      { "id": 27, "name": "大阪府", "population": 8769351 },
+      { "id": 28, "name": "兵庫県", "population": 5369796 },
+      { "id": 29, "name": "奈良県", "population": 1292723 },
+      { "id": 30, "name": "和歌山県", "population": 893323 },
+      { "id": 31, "name": "鳥取県", "population": 537877 },
+      { "id": 32, "name": "島根県", "population": 640733 },
+      { "id": 33, "name": "岡山県", "population": 1842526 },
+      { "id": 34, "name": "広島県", "population": 2741913 },
+      { "id": 35, "name": "山口県", "population": 1289139 },
+      { "id": 36, "name": "徳島県", "population": 692750 },
+      { "id": 37, "name": "香川県", "population": 927429 },
+      { "id": 38, "name": "愛媛県", "population": 1292026 },
+      { "id": 39, "name": "高知県", "population": 665972 },
+      { "id": 40, "name": "福岡県", "population": 5104921 },
+      { "id": 41, "name": "佐賀県", "population": 799146 },
+      { "id": 42, "name": "長崎県", "population": 1262662 },
+      { "id": 43, "name": "熊本県", "population": 1700676 },
+      { "id": 44, "name": "大分県", "population": 1092683 },
+      { "id": 45, "name": "宮崎県", "population": 1040854 },
+      { "id": 46, "name": "鹿児島県", "population": 1541818 },
+      { "id": 47, "name": "沖縄県", "population": 1469145 }
+    ],
+    "2020": [
+      { "id": 1, "name": "北海道", "population": 5224614 },
+      { "id": 2, "name": "青森県", "population": 1237984 },
+      { "id": 3, "name": "岩手県", "population": 1210534 },
+      { "id": 4, "name": "宮城県", "population": 2301996 },
+      { "id": 5, "name": "秋田県", "population": 959502 },
+      { "id": 6, "name": "山形県", "population": 1068027 },
+      { "id": 7, "name": "福島県", "population": 1833152 },
+      { "id": 8, "name": "茨城県", "population": 2867009 },
+      { "id": 9, "name": "栃木県", "population": 1933146 },
+      { "id": 10, "name": "群馬県", "population": 1939110 },
+      { "id": 11, "name": "埼玉県", "population": 7344765 },
+      { "id": 12, "name": "千葉県", "population": 6284480 },
+      { "id": 13, "name": "東京都", "population": 14047594 },
+      { "id": 14, "name": "神奈川県", "population": 9237337 },
+      { "id": 15, "name": "新潟県", "population": 2201272 },
+      { "id": 16, "name": "富山県", "population": 1034814 },
+      { "id": 17, "name": "石川県", "population": 1132847 },
+      { "id": 18, "name": "福井県", "population": 766863 },
+      { "id": 19, "name": "山梨県", "population": 809974 },
+      { "id": 20, "name": "長野県", "population": 2048011 },
+      { "id": 21, "name": "岐阜県", "population": 1978782 },
+      { "id": 22, "name": "静岡県", "population": 3633202 },
+      { "id": 23, "name": "愛知県", "population": 7542415 },
+      { "id": 24, "name": "三重県", "population": 1770254 },
+      { "id": 25, "name": "滋賀県", "population": 1413610 },
+      { "id": 26, "name": "京都府", "population": 2578087 },
+      { "id": 27, "name": "大阪府", "population": 8837685 },
+      { "id": 28, "name": "兵庫県", "population": 5469762 },
+      { "id": 29, "name": "奈良県", "population": 1324473 },
+      { "id": 30, "name": "和歌山県", "population": 922584 },
+      { "id": 31, "name": "鳥取県", "population": 553407 },
+      { "id": 32, "name": "島根県", "population": 671126 },
+      { "id": 33, "name": "岡山県", "population": 1888432 },
+      { "id": 34, "name": "広島県", "population": 2800331 },
+      { "id": 35, "name": "山口県", "population": 1342059 },
+      { "id": 36, "name": "徳島県", "population": 719559 },
+      { "id": 37, "name": "香川県", "population": 950244 },
+      { "id": 38, "name": "愛媛県", "population": 1334841 },
+      { "id": 39, "name": "高知県", "population": 691527 },
+      { "id": 40, "name": "福岡県", "population": 5135214 },
+      { "id": 41, "name": "佐賀県", "population": 811442 },
+      { "id": 42, "name": "長崎県", "population": 1312317 },
+      { "id": 43, "name": "熊本県", "population": 1738301 },
+      { "id": 44, "name": "大分県", "population": 1126992 },
+      { "id": 45, "name": "宮崎県", "population": 1069576 },
+      { "id": 46, "name": "鹿児島県", "population": 1588256 },
+      { "id": 47, "name": "沖縄県", "population": 1467480 }
+    ],
+    "2015": [
+      { "id": 1, "name": "北海道", "population": 5381733 },
+      { "id": 2, "name": "青森県", "population": 1308265 },
+      { "id": 3, "name": "岩手県", "population": 1279594 },
+      { "id": 4, "name": "宮城県", "population": 2333899 },
+      { "id": 5, "name": "秋田県", "population": 1023119 },
+      { "id": 6, "name": "山形県", "population": 1123891 },
+      { "id": 7, "name": "福島県", "population": 1914039 },
+      { "id": 8, "name": "茨城県", "population": 2916976 },
+      { "id": 9, "name": "栃木県", "population": 1974255 },
+      { "id": 10, "name": "群馬県", "population": 1973115 },
+      { "id": 11, "name": "埼玉県", "population": 7266534 },
+      { "id": 12, "name": "千葉県", "population": 6222666 },
+      { "id": 13, "name": "東京都", "population": 13515271 },
+      { "id": 14, "name": "神奈川県", "population": 9126214 },
+      { "id": 15, "name": "新潟県", "population": 2304264 },
+      { "id": 16, "name": "富山県", "population": 1066328 },
+      { "id": 17, "name": "石川県", "population": 1154343 },
+      { "id": 18, "name": "福井県", "population": 786740 },
+      { "id": 19, "name": "山梨県", "population": 834930 },
+      { "id": 20, "name": "長野県", "population": 2098804 },
+      { "id": 21, "name": "岐阜県", "population": 2031903 },
+      { "id": 22, "name": "静岡県", "population": 3700305 },
+      { "id": 23, "name": "愛知県", "population": 7483128 },
+      { "id": 24, "name": "三重県", "population": 1815865 },
+      { "id": 25, "name": "滋賀県", "population": 1412916 },
+      { "id": 26, "name": "京都府", "population": 2610353 },
+      { "id": 27, "name": "大阪府", "population": 8839469 },
+      { "id": 28, "name": "兵庫県", "population": 5534800 },
+      { "id": 29, "name": "奈良県", "population": 1364316 },
+      { "id": 30, "name": "和歌山県", "population": 963579 },
+      { "id": 31, "name": "鳥取県", "population": 573441 },
+      { "id": 32, "name": "島根県", "population": 694352 },
+      { "id": 33, "name": "岡山県", "population": 1921525 },
+      { "id": 34, "name": "広島県", "population": 2843990 },
+      { "id": 35, "name": "山口県", "population": 1404729 },
+      { "id": 36, "name": "徳島県", "population": 755733 },
+      { "id": 37, "name": "香川県", "population": 976263 },
+      { "id": 38, "name": "愛媛県", "population": 1385262 },
+      { "id": 39, "name": "高知県", "population": 728278 },
+      { "id": 40, "name": "福岡県", "population": 5101556 },
+      { "id": 41, "name": "佐賀県", "population": 832832 },
+      { "id": 42, "name": "長崎県", "population": 1377187 },
+      { "id": 43, "name": "熊本県", "population": 1786170 },
+      { "id": 44, "name": "大分県", "population": 1166338 },
+      { "id": 45, "name": "宮崎県", "population": 1104069 },
+      { "id": 46, "name": "鹿児島県", "population": 1648177 },
+      { "id": 47, "name": "沖縄県", "population": 1433566 }
+    ],
+    "2010": [
+      { "id": 1, "name": "北海道", "population": 5506419 },
+      { "id": 2, "name": "青森県", "population": 1373339 },
+      { "id": 3, "name": "岩手県", "population": 1330146 },
+      { "id": 4, "name": "宮城県", "population": 2348165 },
+      { "id": 5, "name": "秋田県", "population": 1085997 },
+      { "id": 6, "name": "山形県", "population": 1168924 },
+      { "id": 7, "name": "福島県", "population": 2029064 },
+      { "id": 8, "name": "茨城県", "population": 2969770 },
+      { "id": 9, "name": "栃木県", "population": 2007683 },
+      { "id": 10, "name": "群馬県", "population": 2008068 },
+      { "id": 11, "name": "埼玉県", "population": 7194556 },
+      { "id": 12, "name": "千葉県", "population": 6216289 },
+      { "id": 13, "name": "東京都", "population": 13159388 },
+      { "id": 14, "name": "神奈川県", "population": 9048331 },
+      { "id": 15, "name": "新潟県", "population": 2374450 },
+      { "id": 16, "name": "富山県", "population": 1093247 },
+      { "id": 17, "name": "石川県", "population": 1169788 },
+      { "id": 18, "name": "福井県", "population": 806314 },
+      { "id": 19, "name": "山梨県", "population": 863075 },
+      { "id": 20, "name": "長野県", "population": 2152449 },
+      { "id": 21, "name": "岐阜県", "population": 2080773 },
+      { "id": 22, "name": "静岡県", "population": 3765007 },
+      { "id": 23, "name": "愛知県", "population": 7410719 },
+      { "id": 24, "name": "三重県", "population": 1854724 },
+      { "id": 25, "name": "滋賀県", "population": 1410777 },
+      { "id": 26, "name": "京都府", "population": 2636092 },
+      { "id": 27, "name": "大阪府", "population": 8865245 },
+      { "id": 28, "name": "兵庫県", "population": 5588133 },
+      { "id": 29, "name": "奈良県", "population": 1400728 },
+      { "id": 30, "name": "和歌山県", "population": 1002198 },
+      { "id": 31, "name": "鳥取県", "population": 588667 },
+      { "id": 32, "name": "島根県", "population": 717397 },
+      { "id": 33, "name": "岡山県", "population": 1945276 },
+      { "id": 34, "name": "広島県", "population": 2860750 },
+      { "id": 35, "name": "山口県", "population": 1451338 },
+      { "id": 36, "name": "徳島県", "population": 785491 },
+      { "id": 37, "name": "香川県", "population": 995842 },
+      { "id": 38, "name": "愛媛県", "population": 1431493 },
+      { "id": 39, "name": "高知県", "population": 764456 },
+      { "id": 40, "name": "福岡県", "population": 5071968 },
+      { "id": 41, "name": "佐賀県", "population": 849788 },
+      { "id": 42, "name": "長崎県", "population": 1426779 },
+      { "id": 43, "name": "熊本県", "population": 1817426 },
+      { "id": 44, "name": "大分県", "population": 1196529 },
+      { "id": 45, "name": "宮崎県", "population": 1135233 },
+      { "id": 46, "name": "鹿児島県", "population": 1706242 },
+      { "id": 47, "name": "沖縄県", "population": 1392818 }
+    ],
+    "2005": [
+      { "id": 1, "name": "北海道", "population": 5627737 },
+      { "id": 2, "name": "青森県", "population": 1436657 },
+      { "id": 3, "name": "岩手県", "population": 1385041 },
+      { "id": 4, "name": "宮城県", "population": 2360218 },
+      { "id": 5, "name": "秋田県", "population": 1145501 },
+      { "id": 6, "name": "山形県", "population": 1216181 },
+      { "id": 7, "name": "福島県", "population": 2113045 },
+      { "id": 8, "name": "茨城県", "population": 2985424 },
+      { "id": 9, "name": "栃木県", "population": 2016631 },
+      { "id": 10, "name": "群馬県", "population": 2024852 },
+      { "id": 11, "name": "埼玉県", "population": 7054243 },
+      { "id": 12, "name": "千葉県", "population": 6056462 },
+      { "id": 13, "name": "東京都", "population": 12576601 },
+      { "id": 14, "name": "神奈川県", "population": 8791597 },
+      { "id": 15, "name": "新潟県", "population": 2431459 },
+      { "id": 16, "name": "富山県", "population": 1111729 },
+      { "id": 17, "name": "石川県", "population": 1174026 },
+      { "id": 18, "name": "福井県", "population": 821592 },
+      { "id": 19, "name": "山梨県", "population": 884515 },
+      { "id": 20, "name": "長野県", "population": 2196114 },
+      { "id": 21, "name": "岐阜県", "population": 2107687 },
+      { "id": 22, "name": "静岡県", "population": 3792377 },
+      { "id": 23, "name": "愛知県", "population": 7254704 },
+      { "id": 24, "name": "三重県", "population": 1866963 },
+      { "id": 25, "name": "滋賀県", "population": 1380343 },
+      { "id": 26, "name": "京都府", "population": 2647660 },
+      { "id": 27, "name": "大阪府", "population": 8817166 },
+      { "id": 28, "name": "兵庫県", "population": 5590601 },
+      { "id": 29, "name": "奈良県", "population": 1421310 },
+      { "id": 30, "name": "和歌山県", "population": 1035969 },
+      { "id": 31, "name": "鳥取県", "population": 607012 },
+      { "id": 32, "name": "島根県", "population": 742223 },
+      { "id": 33, "name": "岡山県", "population": 1957264 },
+      { "id": 34, "name": "広島県", "population": 2878915 },
+      { "id": 35, "name": "山口県", "population": 1492606 },
+      { "id": 36, "name": "徳島県", "population": 809950 },
+      { "id": 37, "name": "香川県", "population": 1003373 },
+      { "id": 38, "name": "愛媛県", "population": 1467815 },
+      { "id": 39, "name": "高知県", "population": 796292 },
+      { "id": 40, "name": "福岡県", "population": 5049908 },
+      { "id": 41, "name": "佐賀県", "population": 866369 },
+      { "id": 42, "name": "長崎県", "population": 1478632 },
+      { "id": 43, "name": "熊本県", "population": 1842236 },
+      { "id": 44, "name": "大分県", "population": 1221128 },
+      { "id": 45, "name": "宮崎県", "population": 1153042 },
+      { "id": 46, "name": "鹿児島県", "population": 1753179 },
+      { "id": 47, "name": "沖縄県", "population": 1367854 }
+    ],
+    "2000": [
+      { "id": 1, "name": "北海道", "population": 5683062 },
+      { "id": 2, "name": "青森県", "population": 1475728 },
+      { "id": 3, "name": "岩手県", "population": 1416180 },
+      { "id": 4, "name": "宮城県", "population": 2365320 },
+      { "id": 5, "name": "秋田県", "population": 1189279 },
+      { "id": 6, "name": "山形県", "population": 1244147 },
+      { "id": 7, "name": "福島県", "population": 2126938 },
+      { "id": 8, "name": "茨城県", "population": 2985676 },
+      { "id": 9, "name": "栃木県", "population": 2004817 },
+      { "id": 10, "name": "群馬県", "population": 2024823 },
+      { "id": 11, "name": "埼玉県", "population": 6938004 },
+      { "id": 12, "name": "千葉県", "population": 5926285 },
+      { "id": 13, "name": "東京都", "population": 12064101 },
+      { "id": 14, "name": "神奈川県", "population": 8489974 },
+      { "id": 15, "name": "新潟県", "population": 2475733 },
+      { "id": 16, "name": "富山県", "population": 1120851 },
+      { "id": 17, "name": "石川県", "population": 1180977 },
+      { "id": 18, "name": "福井県", "population": 828944 },
+      { "id": 19, "name": "山梨県", "population": 888172 },
+      { "id": 20, "name": "長野県", "population": 2215000 },
+      { "id": 21, "name": "岐阜県", "population": 2107700 },
+      { "id": 22, "name": "静岡県", "population": 3767427 },
+      { "id": 23, "name": "愛知県", "population": 7043300 },
+      { "id": 24, "name": "三重県", "population": 1857339 },
+      { "id": 25, "name": "滋賀県", "population": 1342832 },
+      { "id": 26, "name": "京都府", "population": 2644391 },
+      { "id": 27, "name": "大阪府", "population": 8805081 },
+      { "id": 28, "name": "兵庫県", "population": 5550574 },
+      { "id": 29, "name": "奈良県", "population": 1442795 },
+      { "id": 30, "name": "和歌山県", "population": 1069912 },
+      { "id": 31, "name": "鳥取県", "population": 613289 },
+      { "id": 32, "name": "島根県", "population": 761503 },
+      { "id": 33, "name": "岡山県", "population": 1950828 },
+      { "id": 34, "name": "広島県", "population": 2876642 },
+      { "id": 35, "name": "山口県", "population": 1528139 },
+      { "id": 36, "name": "徳島県", "population": 824108 },
+      { "id": 37, "name": "香川県", "population": 1012431 },
+      { "id": 38, "name": "愛媛県", "population": 1493126 },
+      { "id": 39, "name": "高知県", "population": 813876 },
+      { "id": 40, "name": "福岡県", "population": 5015699 },
+      { "id": 41, "name": "佐賀県", "population": 876654 },
+      { "id": 42, "name": "長崎県", "population": 1516523 },
+      { "id": 43, "name": "熊本県", "population": 1859345 },
+      { "id": 44, "name": "大分県", "population": 1221159 },
+      { "id": 45, "name": "宮崎県", "population": 1170014 },
+      { "id": 46, "name": "鹿児島県", "population": 1786194 },
+      { "id": 47, "name": "沖縄県", "population": 1318220 }
+    ],
+    "1995": [
+      { "id": 1, "name": "北海道", "population": 5692321 },
+      { "id": 2, "name": "青森県", "population": 1481663 },
+      { "id": 3, "name": "岩手県", "population": 1433611 },
+      { "id": 4, "name": "宮城県", "population": 2345976 },
+      { "id": 5, "name": "秋田県", "population": 1213644 },
+      { "id": 6, "name": "山形県", "population": 1256958 },
+      { "id": 7, "name": "福島県", "population": 2133592 },
+      { "id": 8, "name": "茨城県", "population": 2955530 },
+      { "id": 9, "name": "栃木県", "population": 1984391 },
+      { "id": 10, "name": "群馬県", "population": 1999120 },
+      { "id": 11, "name": "埼玉県", "population": 6759311 },
+      { "id": 12, "name": "千葉県", "population": 5797782 },
+      { "id": 13, "name": "東京都", "population": 11773605 },
+      { "id": 14, "name": "神奈川県", "population": 8245900 },
+      { "id": 15, "name": "新潟県", "population": 2488364 },
+      { "id": 16, "name": "富山県", "population": 1126331 },
+      { "id": 17, "name": "石川県", "population": 1180068 },
+      { "id": 18, "name": "福井県", "population": 827299 },
+      { "id": 19, "name": "山梨県", "population": 881996 },
+      { "id": 20, "name": "長野県", "population": 2193988 },
+      { "id": 21, "name": "岐阜県", "population": 2089667 },
+      { "id": 22, "name": "静岡県", "population": 3737689 },
+      { "id": 23, "name": "愛知県", "population": 6868336 },
+      { "id": 24, "name": "三重県", "population": 1841734 },
+      { "id": 25, "name": "滋賀県", "population": 1287105 },
+      { "id": 26, "name": "京都府", "population": 2629592 },
+      { "id": 27, "name": "大阪府", "population": 8797268 },
+      { "id": 28, "name": "兵庫県", "population": 5401877 },
+      { "id": 29, "name": "奈良県", "population": 1430862 },
+      { "id": 30, "name": "和歌山県", "population": 1087037 },
+      { "id": 31, "name": "鳥取県", "population": 614627 },
+      { "id": 32, "name": "島根県", "population": 775765 },
+      { "id": 33, "name": "岡山県", "population": 1954153 },
+      { "id": 34, "name": "広島県", "population": 2881748 },
+      { "id": 35, "name": "山口県", "population": 1555541 },
+      { "id": 36, "name": "徳島県", "population": 831614 },
+      { "id": 37, "name": "香川県", "population": 1007469 },
+      { "id": 38, "name": "愛媛県", "population": 1506700 },
+      { "id": 39, "name": "高知県", "population": 832885 },
+      { "id": 40, "name": "福岡県", "population": 4933393 },
+      { "id": 41, "name": "佐賀県", "population": 881944 },
+      { "id": 42, "name": "長崎県", "population": 1544933 },
+      { "id": 43, "name": "熊本県", "population": 1869371 },
+      { "id": 44, "name": "大分県", "population": 1231362 },
+      { "id": 45, "name": "宮崎県", "population": 1175819 },
+      { "id": 46, "name": "鹿児島県", "population": 1804153 },
+      { "id": 47, "name": "沖縄県", "population": 1273440 }
+    ],
+    "1990": [
+      { "id": 1, "name": "北海道", "population": 5643647 },
+      { "id": 2, "name": "青森県", "population": 1482873 },
+      { "id": 3, "name": "岩手県", "population": 1432435 },
+      { "id": 4, "name": "宮城県", "population": 2248558 },
+      { "id": 5, "name": "秋田県", "population": 1227478 },
+      { "id": 6, "name": "山形県", "population": 1258883 },
+      { "id": 7, "name": "福島県", "population": 2104047 },
+      { "id": 8, "name": "茨城県", "population": 2845382 },
+      { "id": 9, "name": "栃木県", "population": 1935165 },
+      { "id": 10, "name": "群馬県", "population": 1966265 },
+      { "id": 11, "name": "埼玉県", "population": 6405323 },
+      { "id": 12, "name": "千葉県", "population": 5555033 },
+      { "id": 13, "name": "東京都", "population": 11855563 },
+      { "id": 14, "name": "神奈川県", "population": 7980391 },
+      { "id": 15, "name": "新潟県", "population": 2478460 },
+      { "id": 16, "name": "富山県", "population": 1120171 },
+      { "id": 17, "name": "石川県", "population": 1165913 },
+      { "id": 18, "name": "福井県", "population": 819663 },
+      { "id": 19, "name": "山梨県", "population": 852932 },
+      { "id": 20, "name": "長野県", "population": 2157147 },
+      { "id": 21, "name": "岐阜県", "population": 2066579 },
+      { "id": 22, "name": "静岡県", "population": 3670984 },
+      { "id": 23, "name": "愛知県", "population": 6690603 },
+      { "id": 24, "name": "三重県", "population": 1793094 },
+      { "id": 25, "name": "滋賀県", "population": 1222411 },
+      { "id": 26, "name": "京都府", "population": 2602460 },
+      { "id": 27, "name": "大阪府", "population": 8734516 },
+      { "id": 28, "name": "兵庫県", "population": 5278050 },
+      { "id": 29, "name": "奈良県", "population": 1385473 },
+      { "id": 30, "name": "和歌山県", "population": 1087612 },
+      { "id": 31, "name": "鳥取県", "population": 615722 },
+      { "id": 32, "name": "島根県", "population": 784013 },
+      { "id": 33, "name": "岡山県", "population": 1931086 },
+      { "id": 34, "name": "広島県", "population": 2849226 },
+      { "id": 35, "name": "山口県", "population": 1572803 },
+      { "id": 36, "name": "徳島県", "population": 831498 },
+      { "id": 37, "name": "香川県", "population": 995163 },
+      { "id": 38, "name": "愛媛県", "population": 1515221 },
+      { "id": 39, "name": "高知県", "population": 835269 },
+      { "id": 40, "name": "福岡県", "population": 4811099 },
+      { "id": 41, "name": "佐賀県", "population": 878071 },
+      { "id": 42, "name": "長崎県", "population": 1563148 },
+      { "id": 43, "name": "熊本県", "population": 1854743 },
+      { "id": 44, "name": "大分県", "population": 1236855 },
+      { "id": 45, "name": "宮崎県", "population": 1169376 },
+      { "id": 46, "name": "鹿児島県", "population": 1819260 },
+      { "id": 47, "name": "沖縄県", "population": 1222398 }
+    ],
+    "1985": [
+      { "id": 1, "name": "北海道", "population": 5679439 },
+      { "id": 2, "name": "青森県", "population": 1524448 },
+      { "id": 3, "name": "岩手県", "population": 1433606 },
+      { "id": 4, "name": "宮城県", "population": 2176295 },
+      { "id": 5, "name": "秋田県", "population": 1254032 },
+      { "id": 6, "name": "山形県", "population": 1261683 },
+      { "id": 7, "name": "福島県", "population": 2080304 },
+      { "id": 8, "name": "茨城県", "population": 2725005 },
+      { "id": 9, "name": "栃木県", "population": 1866039 },
+      { "id": 10, "name": "群馬県", "population": 1921158 },
+      { "id": 11, "name": "埼玉県", "population": 5863678 },
+      { "id": 12, "name": "千葉県", "population": 5148163 },
+      { "id": 13, "name": "東京都", "population": 11829363 },
+      { "id": 14, "name": "神奈川県", "population": 7431974 },
+      { "id": 15, "name": "新潟県", "population": 2478480 },
+      { "id": 16, "name": "富山県", "population": 1118361 },
+      { "id": 17, "name": "石川県", "population": 1152325 },
+      { "id": 18, "name": "福井県", "population": 812192 },
+      { "id": 19, "name": "山梨県", "population": 832832 },
+      { "id": 20, "name": "長野県", "population": 2136934 },
+      { "id": 21, "name": "岐阜県", "population": 2028507 },
+      { "id": 22, "name": "静岡県", "population": 3574801 },
+      { "id": 23, "name": "愛知県", "population": 6455173 },
+      { "id": 24, "name": "三重県", "population": 1747407 },
+      { "id": 25, "name": "滋賀県", "population": 1155844 },
+      { "id": 26, "name": "京都府", "population": 2586574 },
+      { "id": 27, "name": "大阪府", "population": 8668095 },
+      { "id": 28, "name": "兵庫県", "population": 5141577 },
+      { "id": 29, "name": "奈良県", "population": 1304866 },
+      { "id": 30, "name": "和歌山県", "population": 1087799 },
+      { "id": 31, "name": "鳥取県", "population": 616024 },
+      { "id": 32, "name": "島根県", "population": 800003 },
+      { "id": 33, "name": "岡山県", "population": 1916906 },
+      { "id": 34, "name": "広島県", "population": 2799097 },
+      { "id": 35, "name": "山口県", "population": 1601627 },
+      { "id": 36, "name": "徳島県", "population": 834691 },
+      { "id": 37, "name": "香川県", "population": 991275 },
+      { "id": 38, "name": "愛媛県", "population": 1529983 },
+      { "id": 39, "name": "高知県", "population": 839784 },
+      { "id": 40, "name": "福岡県", "population": 4719259 },
+      { "id": 41, "name": "佐賀県", "population": 880013 },
+      { "id": 42, "name": "長崎県", "population": 1593968 },
+      { "id": 43, "name": "熊本県", "population": 1837748 },
+      { "id": 44, "name": "大分県", "population": 1250214 },
+      { "id": 45, "name": "宮崎県", "population": 1175543 },
+      { "id": 46, "name": "鹿児島県", "population": 1819270 },
+      { "id": 47, "name": "沖縄県", "population": 1179097 }
+    ],
+    "1980": [
+      { "id": 1, "name": "北海道", "population": 5575989 },
+      { "id": 2, "name": "青森県", "population": 1523907 },
+      { "id": 3, "name": "岩手県", "population": 1421927 },
+      { "id": 4, "name": "宮城県", "population": 2082320 },
+      { "id": 5, "name": "秋田県", "population": 1256745 },
+      { "id": 6, "name": "山形県", "population": 1251935 },
+      { "id": 7, "name": "福島県", "population": 2035252 },
+      { "id": 8, "name": "茨城県", "population": 2558004 },
+      { "id": 9, "name": "栃木県", "population": 1792201 },
+      { "id": 10, "name": "群馬県", "population": 1848577 },
+      { "id": 11, "name": "埼玉県", "population": 5420482 },
+      { "id": 12, "name": "千葉県", "population": 4735439 },
+      { "id": 13, "name": "東京都", "population": 11618281 },
+      { "id": 14, "name": "神奈川県", "population": 6838268 },
+      { "id": 15, "name": "新潟県", "population": 2451355 },
+      { "id": 16, "name": "富山県", "population": 1103459 },
+      { "id": 17, "name": "石川県", "population": 1119304 },
+      { "id": 18, "name": "福井県", "population": 794473 },
+      { "id": 19, "name": "山梨県", "population": 804256 },
+      { "id": 20, "name": "長野県", "population": 2083935 },
+      { "id": 21, "name": "岐阜県", "population": 1968864 },
+      { "id": 22, "name": "静岡県", "population": 3446864 },
+      { "id": 23, "name": "愛知県", "population": 6221638 },
+      { "id": 24, "name": "三重県", "population": 1686940 },
+      { "id": 25, "name": "滋賀県", "population": 1079898 },
+      { "id": 26, "name": "京都府", "population": 2527330 },
+      { "id": 27, "name": "大阪府", "population": 8473446 },
+      { "id": 28, "name": "兵庫県", "population": 4992984 },
+      { "id": 29, "name": "奈良県", "population": 1209365 },
+      { "id": 30, "name": "和歌山県", "population": 1073852 },
+      { "id": 31, "name": "鳥取県", "population": 604221 },
+      { "id": 32, "name": "島根県", "population": 809413 },
+      { "id": 33, "name": "岡山県", "population": 1871147 },
+      { "id": 34, "name": "広島県", "population": 2739150 },
+      { "id": 35, "name": "山口県", "population": 1587079 },
+      { "id": 36, "name": "徳島県", "population": 825261 },
+      { "id": 37, "name": "香川県", "population": 978643 },
+      { "id": 38, "name": "愛媛県", "population": 1506894 },
+      { "id": 39, "name": "高知県", "population": 831090 },
+      { "id": 40, "name": "福岡県", "population": 4553461 },
+      { "id": 41, "name": "佐賀県", "population": 865574 },
+      { "id": 42, "name": "長崎県", "population": 1590564 },
+      { "id": 43, "name": "熊本県", "population": 1813131 },
+      { "id": 44, "name": "大分県", "population": 1228945 },
+      { "id": 45, "name": "宮崎県", "population": 1150493 },
+      { "id": 46, "name": "鹿児島県", "population": 1784948 },
+      { "id": 47, "name": "沖縄県", "population": 1106559 }
+    ],
+    "1975": [
+      { "id": 1, "name": "北海道", "population": 5338206 },
+      { "id": 2, "name": "青森県", "population": 1468646 },
+      { "id": 3, "name": "岩手県", "population": 1386518 },
+      { "id": 4, "name": "宮城県", "population": 1955269 },
+      { "id": 5, "name": "秋田県", "population": 1232474 },
+      { "id": 6, "name": "山形県", "population": 1220401 },
+      { "id": 7, "name": "福島県", "population": 1946056 },
+      { "id": 8, "name": "茨城県", "population": 2342194 },
+      { "id": 9, "name": "栃木県", "population": 1698002 },
+      { "id": 10, "name": "群馬県", "population": 1756531 },
+      { "id": 11, "name": "埼玉県", "population": 4821342 },
+      { "id": 12, "name": "千葉県", "population": 4149231 },
+      { "id": 13, "name": "東京都", "population": 11673555 },
+      { "id": 14, "name": "神奈川県", "population": 6397748 },
+      { "id": 15, "name": "新潟県", "population": 2391913 },
+      { "id": 16, "name": "富山県", "population": 1070656 },
+      { "id": 17, "name": "石川県", "population": 1069875 },
+      { "id": 18, "name": "福井県", "population": 772391 },
+      { "id": 19, "name": "山梨県", "population": 783063 },
+      { "id": 20, "name": "長野県", "population": 2017367 },
+      { "id": 21, "name": "岐阜県", "population": 1869372 },
+      { "id": 22, "name": "静岡県", "population": 3308892 },
+      { "id": 23, "name": "愛知県", "population": 5934543 },
+      { "id": 24, "name": "三重県", "population": 1604533 },
+      { "id": 25, "name": "滋賀県", "population": 985618 },
+      { "id": 26, "name": "京都府", "population": 2424856 },
+      { "id": 27, "name": "大阪府", "population": 8278925 },
+      { "id": 28, "name": "兵庫県", "population": 4801614 },
+      { "id": 29, "name": "奈良県", "population": 1083431 },
+      { "id": 30, "name": "和歌山県", "population": 1043329 },
+      { "id": 31, "name": "鳥取県", "population": 581309 },
+      { "id": 32, "name": "島根県", "population": 795431 },
+      { "id": 33, "name": "岡山県", "population": 1813508 },
+      { "id": 34, "name": "広島県", "population": 2646324 },
+      { "id": 35, "name": "山口県", "population": 1555006 },
+      { "id": 36, "name": "徳島県", "population": 805372 },
+      { "id": 37, "name": "香川県", "population": 961298 },
+      { "id": 38, "name": "愛媛県", "population": 1464483 },
+      { "id": 39, "name": "高知県", "population": 808948 },
+      { "id": 40, "name": "福岡県", "population": 4292994 },
+      { "id": 41, "name": "佐賀県", "population": 837568 },
+      { "id": 42, "name": "長崎県", "population": 1570251 },
+      { "id": 43, "name": "熊本県", "population": 1756086 },
+      { "id": 44, "name": "大分県", "population": 1208570 },
+      { "id": 45, "name": "宮崎県", "population": 1111623 },
+      { "id": 46, "name": "鹿児島県", "population": 1723511 },
+      { "id": 47, "name": "沖縄県", "population": 1042571 }
+    ],
+    "1970": [
+      { "id": 1, "name": "北海道", "population": 5184287 },
+      { "id": 2, "name": "青森県", "population": 1427520 },
+      { "id": 3, "name": "岩手県", "population": 1355447 },
+      { "id": 4, "name": "宮城県", "population": 1819223 },
+      { "id": 5, "name": "秋田県", "population": 1198897 },
+      { "id": 6, "name": "山形県", "population": 1190367 },
+      { "id": 7, "name": "福島県", "population": 1889813 },
+      { "id": 8, "name": "茨城県", "population": 2143551 },
+      { "id": 9, "name": "栃木県", "population": 1580007 },
+      { "id": 10, "name": "群馬県", "population": 1658908 },
+      { "id": 11, "name": "埼玉県", "population": 3866472 },
+      { "id": 12, "name": "千葉県", "population": 3366624 },
+      { "id": 13, "name": "東京都", "population": 11408071 },
+      { "id": 14, "name": "神奈川県", "population": 5472247 },
+      { "id": 15, "name": "新潟県", "population": 2325373 },
+      { "id": 16, "name": "富山県", "population": 1029695 },
+      { "id": 17, "name": "石川県", "population": 1002387 },
+      { "id": 18, "name": "福井県", "population": 742511 },
+      { "id": 19, "name": "山梨県", "population": 762029 },
+      { "id": 20, "name": "長野県", "population": 1957457 },
+      { "id": 21, "name": "岐阜県", "population": 1758954 },
+      { "id": 22, "name": "静岡県", "population": 3089886 },
+      { "id": 23, "name": "愛知県", "population": 5386163 },
+      { "id": 24, "name": "三重県", "population": 1509177 },
+      { "id": 25, "name": "滋賀県", "population": 889679 },
+      { "id": 26, "name": "京都府", "population": 2250087 },
+      { "id": 27, "name": "大阪府", "population": 7620480 },
+      { "id": 28, "name": "兵庫県", "population": 4667928 },
+      { "id": 29, "name": "奈良県", "population": 930198 },
+      { "id": 30, "name": "和歌山県", "population": 1003463 },
+      { "id": 31, "name": "鳥取県", "population": 568977 },
+      { "id": 32, "name": "島根県", "population": 773575 },
+      { "id": 33, "name": "岡山県", "population": 1707038 },
+      { "id": 34, "name": "広島県", "population": 2496223 },
+      { "id": 35, "name": "山口県", "population": 1511364 },
+      { "id": 36, "name": "徳島県", "population": 791111 },
+      { "id": 37, "name": "香川県", "population": 906660 },
+      { "id": 38, "name": "愛媛県", "population": 1414436 },
+      { "id": 39, "name": "高知県", "population": 786882 },
+      { "id": 40, "name": "福岡県", "population": 3964696 },
+      { "id": 41, "name": "佐賀県", "population": 820300 },
+      { "id": 42, "name": "長崎県", "population": 1570778 },
+      { "id": 43, "name": "熊本県", "population": 1723466 },
+      { "id": 44, "name": "大分県", "population": 1198516 },
+      { "id": 45, "name": "宮崎県", "population": 1051025 },
+      { "id": 46, "name": "鹿児島県", "population": 1729007 },
+      { "id": 47, "name": "沖縄県", "population": 945111 }
+    ]
+  };
+
+  // ── 定数 ──
+  const GEOJSON_URL = 'https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson';
+  const SVG_W = 900, SVG_H = 680;
+
+  // ── 年リスト（降順） ──
+  const years = Object.keys(populationData).sort((a, b) => +b - +a);
+
+  // ── 年選択UIの初期化 ──
+  const selectEl = document.getElementById('year-select');
+  years.forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '年';
+    selectEl.appendChild(opt);
+  });
+  let currentYear = years[0];
+  document.getElementById('year-display').textContent = currentYear + '年';
+
+  // ── 全年を通じた人口の最小・最大（スケールを固定して年間比較しやすくする） ──
+  const allPops = Object.values(populationData).flat().map(d => d.population);
+  const [minPop, maxPop] = d3.extent(allPops);
+
+  // ── カラースケール（薄い青 → 濃い青） ──
+  const colorScale = d3.scaleSequential()
+    .domain([minPop, maxPop])
+    .interpolator(d3.interpolateBlues);
+
+  // ── 都道府県IDから人口エントリを引くMapを生成 ──
+  function buildPopMap(year) {
+    return new Map(populationData[year].map(d => [d.id, d]));
+  }
+
+  // ── SVG・投影・パスジェネレーター ──
+  const svg = d3.select('#map');
+  const projection = d3.geoMercator();
+  const pathGen = d3.geoPath().projection(projection);
+
+  // ── ツールチップ ──
+  const tooltip = document.getElementById('tooltip');
+
+  // ── 凡例の描画 ──
+  function drawLegend() {
+    const legendSvg = d3.select('#legend');
+    const lW = 320, lH = 20, lX = 10, lY = 16;
+
+    const defs = legendSvg.append('defs');
+    const grad = defs.append('linearGradient').attr('id', 'pop-gradient')
+      .attr('x1', '0%').attr('x2', '100%');
+    d3.range(11).forEach(i => {
+      grad.append('stop')
+        .attr('offset', `${i * 10}%`)
+        .attr('stop-color', colorScale(minPop + (maxPop - minPop) * i / 10));
+    });
+
+    legendSvg.append('text')
+      .attr('x', lX).attr('y', lY - 4)
+      .attr('font-size', '11px').attr('fill', '#555')
+      .text('人口スケール（人）');
+
+    legendSvg.append('rect')
+      .attr('x', lX).attr('y', lY)
+      .attr('width', lW).attr('height', lH)
+      .attr('fill', 'url(#pop-gradient)')
+      .attr('rx', 2);
+
+    const axisScale = d3.scaleLinear().domain([minPop, maxPop]).range([lX, lX + lW]);
+    legendSvg.append('g')
+      .attr('transform', `translate(0,${lY + lH})`)
+      .call(
+        d3.axisBottom(axisScale)
+          .ticks(5)
+          .tickFormat(d => (d / 10000).toFixed(0) + '万')
+      )
+      .call(g => g.select('.domain').attr('stroke', '#aaa'))
+      .call(g => g.selectAll('line').attr('stroke', '#aaa'))
+      .call(g => g.selectAll('text').attr('font-size', '11px').attr('fill', '#555'));
+  }
+
+  // ── GeoJSONを取得して地図を描画 ──
+  d3.json(GEOJSON_URL).then(geojson => {
+    projection.fitExtent([[10, 10], [SVG_W - 10, SVG_H - 10]], geojson);
+
+    let popMap = buildPopMap(currentYear);
+
+    // 都道府県パスの描画
+    svg.selectAll('.prefecture-path')
+      .data(geojson.features)
+      .enter()
+      .append('path')
+      .attr('class', 'prefecture-path')
+      .attr('d', pathGen)
+      .attr('fill', d => {
+        const entry = popMap.get(+d.id);
+        return entry ? colorScale(entry.population) : '#ccc';
+      })
+      .on('mousemove', (event, d) => {
+        const entry = popMap.get(+d.id);
+        if (!entry) return;
+        tooltip.style.opacity = '1';
+        tooltip.style.left = (event.clientX + 14) + 'px';
+        tooltip.style.top = (event.clientY - 40) + 'px';
+        tooltip.innerHTML =
+          `<strong>${entry.name}</strong><br>` +
+          `人口: ${entry.population.toLocaleString()} 人`;
+      })
+      .on('mouseleave', () => { tooltip.style.opacity = '0'; });
+
+    drawLegend();
+
+    // ── 年選択イベント ──
+    selectEl.addEventListener('change', function () {
+      currentYear = this.value;
+      document.getElementById('year-display').textContent = currentYear + '年';
+      popMap = buildPopMap(currentYear);
+
+      svg.selectAll('.prefecture-path')
+        .transition().duration(600)
+        .attr('fill', d => {
+          const entry = popMap.get(+d.id);
+          return entry ? colorScale(entry.population) : '#ccc';
+        });
+    });
+
+  }).catch(err => {
+    console.error('GeoJSONの読み込みに失敗しました:', err);
+    document.getElementById('map-container').innerHTML =
+      '<p style="padding:20px;color:red;">⚠️ 地図データの読み込みに失敗しました。インターネット接続を確認してください。</p>';
+  });
+</script>
+
+</body>
+</html>
