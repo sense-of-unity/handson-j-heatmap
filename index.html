@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>日本 人口ヒートマップ</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; margin: 0; padding: 16px; }
+    #controls { margin-bottom: 12px; display:flex; gap:12px; align-items:center; }
+    #map { width: 100%; max-width: 960px; height: 700px; border: 1px solid #ddd; }
+    .pref { stroke: #fff; stroke-width: 0.5px; cursor: pointer; }
+    .pref.selected { stroke: #000; stroke-width: 1.5px; }
+    .tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,0.75); color: #fff; padding:6px 8px; border-radius:4px; font-size:13px; display:none; }
+    .legend { font-size: 12px; }
+    #info { margin-top: 8px; padding:6px; background:#f9f9f9; border:1px solid #ddd; max-width:960px; }
+  </style>
+</head>
+<body>
+  <h1>日本 人口ヒートマップ</h1>
+  <div id="controls">
+    <label for="year">年：</label>
+    <select id="year"></select>
+    <span>（ローカルで確認する場合は: python -m http.server を推奨）</span>
+  </div>
+  <div id="map"></div>
+  <div id="legend" class="legend"></div>
+  <div id="tooltip" class="tooltip"></div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    // Config
+    const GEOJSON_URL = 'https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson';
+    const POP_URL = 'data/population.json';
+
+    const width = 960;
+    const height = 700;
+
+    const svg = d3.select('#map').append('svg')
+      .attr('viewBox', `0 0 ${width} ${height}`)
+      .style('width', '100%').style('height', 'auto');
+
+    const g = svg.append('g');
+
+    const projection = d3.geoMercator()
+      .center([137.0, 38.2])
+      .scale(1100)
+      .translate([width / 2, height / 2]);
+
+    const path = d3.geoPath().projection(projection);
+
+    const tooltip = d3.select('#tooltip');
+    const infoDiv = d3.select('#info');
+
+    // zoom behavior
+    const zoom = d3.zoom()
+      .scaleExtent([1, 8])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
+        // adjust stroke width so borders remain visible
+        g.selectAll('path').attr('stroke-width', 0.5 / event.transform.k);
+      });
+
+    svg.call(zoom);
+
+    // Utility: robustly extract prefecture numeric id from GeoJSON feature
+    function featurePrefId(feature){
+      // try feature.id
+      let cand = feature.id || (feature.properties && (feature.properties.id || feature.properties.CODE || feature.properties.prefCode || feature.properties.prefcode));
+      if(cand !== undefined && cand !== null){
+        const n = parseInt(cand, 10);
+        if(!isNaN(n)) return n;
+      }
+      return null;
+    }
+
+    // Load both geojson and population data
+    Promise.all([
+      d3.json(GEOJSON_URL),
+      d3.json(POP_URL)
+    ]).then(([geojson, popData]) => {
+      // prepare population lookup:
+      const years = Object.keys(popData).sort((a,b)=>+b-+a);
+      const popByYear = {};
+      years.forEach(y => {
+        const arr = popData[y];
+        const byId = new Map();
+        const byName = new Map();
+        arr.forEach(d => {
+          const id = Number(d.id);
+          if(!isNaN(id)) byId.set(id, d);
+          if(d.name) byName.set(String(d.name).trim(), d);
+        });
+        popByYear[y] = { byId, byName };
+      });
+
+      // populate year selector
+      const yearSelect = d3.select('#year');
+      yearSelect.selectAll('option')
+        .data(years)
+        .join('option')
+        .attr('value', d=>d)
+        .text(d=>d);
+
+      // draw map features
+      g.selectAll('path')
+        .data(geojson.features)
+        .join('path')
+        .attr('d', path)
+        .attr('class', 'pref')
+        .each(function(f){ d3.select(this).datum(f); });
+
+      // color scale placeholder
+      let colorScale = d3.scaleSequential(d3.interpolateReds).domain([0,1]);
+
+      function getPopulationForFeature(feature, year){
+        const lookup = popByYear[year];
+        if(!lookup) return null;
+        // try numeric id
+        const fid = featurePrefId(feature);
+        if(fid !== null){
+          const v = lookup.byId.get(fid);
+          if(v) return v.population;
+        }
+        // try name match: check common property values for equality
+        const props = feature.properties || {};
+        for(const val of Object.values(props)){
+          if(typeof val === 'string'){
+            const name = val.trim();
+            if(lookup.byName.has(name)) return lookup.byName.get(name).population;
+          }
+        }
+        return null;
+      }
+
+      function updateMap(year){
+        // compute min/max
+        const pops = [];
+        popByYear[year].byId.forEach(v=>pops.push(v.population));
+        if(pops.length === 0) return;
+        const min = d3.min(pops);
+        const max = d3.max(pops);
+        colorScale = d3.scaleSequential().interpolator(d3.interpolateOrRd).domain([min, max]);
+
+        g.selectAll('path')
+          .transition().duration(400)
+          .style('fill', f=>{
+            const val = getPopulationForFeature(f, year);
+            if(val === null || val === undefined) return '#eee';
+            return colorScale(val);
+          });
+
+        drawLegend(min, max);
+      }
+
+      function drawLegend(min, max){
+        const legendWidth = 300;
+        const legendHeight = 10;
+        const legend = d3.select('#legend');
+        legend.html('');
+        legend.append('div').text(`人口 (最小: ${min.toLocaleString()} 〜 最大: ${max.toLocaleString()})`);
+
+        const canvas = legend.append('canvas')
+          .attr('width', legendWidth)
+          .attr('height', legendHeight)
+          .node();
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createLinearGradient(0,0,legendWidth,0);
+        for(let i=0;i<=10;i++){
+          const t = i/10;
+          gradient.addColorStop(t, d3.interpolateOrRd(t));
+        }
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0,0,legendWidth,legendHeight);
+
+        // ticks
+        const ticks = d3.scaleLinear().domain([min,max]).ticks(5);
+        const tickStr = ticks.map(t=>t.toLocaleString()).join(' — ');
+        legend.append('div').text(tickStr);
+      }
+
+      // tooltip & click behavior
+      g.selectAll('path')
+        .on('mousemove', function(event, d){
+          const year = yearSelect.node().value;
+          const pop = getPopulationForFeature(d, year);
+          const name = (d.properties && (d.properties.nam_ja || d.properties.name || d.properties.NAME || d.properties.prefecture || d.properties.N03_004)) || '—';
+          tooltip.style('left', (event.pageX + 12) + 'px')
+            .style('top', (event.pageY + 12) + 'px')
+            .style('display', 'block')
+            .html(`<strong>${name}</strong><br/>人口: ${pop ? pop.toLocaleString() : 'データなし'}`);
+        })
+        .on('mouseout', function(){ tooltip.style('display','none'); })
+        .on('click', function(event, d){
+          // show detailed info in info panel
+          const year = yearSelect.node().value;
+          const pop = getPopulationForFeature(d, year);
+          const id = featurePrefId(d) || '—';
+          const name = (d.properties && (d.properties.nam_ja || d.properties.name || d.properties.NAME || d.properties.prefecture || d.properties.N03_004)) || '—';
+          infoDiv.html(`<strong>${name}</strong> (ID: ${id})<br/>人口 (${year}): ${pop ? pop.toLocaleString() : 'データなし'}`);
+          // highlight selection
+          g.selectAll('.pref').classed('selected', false);
+          d3.select(this).classed('selected', true);
+        });
+
+      // initial render
+      const initialYear = years[0];
+      yearSelect.property('value', initialYear);
+      updateMap(initialYear);
+
+      yearSelect.on('change', function(){
+        const y = this.value;
+        updateMap(y);
+      });
+
+    }).catch(err => {
+      d3.select('#map').append('div').style('color','red').text('データ読み込みに失敗しました。ローカルで実行する場合は python -m http.server で起動してください。');
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
